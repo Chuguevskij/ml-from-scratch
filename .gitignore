@@ -1,1 +1,4 @@
 .venv/
+linear_models/analyis.ipynb
+.mypy_cache
+__pycache__
