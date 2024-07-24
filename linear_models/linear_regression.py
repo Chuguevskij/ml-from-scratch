@@ -124,7 +124,7 @@ class MyLineReg():
         return self._weights[1:]
     
     def __str__(self):
-        return f"{__class__.__name__} class: n_iter={self.n_iter}, learning_rate={self.learning_rate}"
+        return f"{__class__.__name__} class: n_iter={self._n_iter}, learning_rate={self._learning_rate}"
     
 df_prices = pd.read_csv('C:/Users/chugu/datasets/linear_reg/boston_house_prices.csv')
 X = df_prices.loc[:, df_prices.columns != 'MEDV']
