@@ -1,15 +1,19 @@
 import pandas as pd
 import numpy as np
+import random
 
 class MyLineReg():
     def __init__(self, n_iter=100, learning_rate=0.1, metric=None,
-                 reg=None, l1_coef=0, l2_coef=0):
+                 reg=None, l1_coef=0, l2_coef=0,
+                 sgd_sample=None, random_state=42):
         self._n_iter  = n_iter
         self._learning_rate = learning_rate
         self._metric = metric
         self._reg = reg
         self._l1_coef = l1_coef
         self._l2_coef = l2_coef
+        self.sgd_sample = sgd_sample
+        self.random_state = random_state
 
     @staticmethod
     def _mean_squared_error(y, y_hat):
@@ -60,7 +64,17 @@ class MyLineReg():
     def fit(self, X: pd.DataFrame, y: pd.Series, verbose=False):
         self._X = X
         self._X.insert(0, 'bias', 1)
-        self._weights = np.ones(self._X.shape[1]) 
+        self._weights = np.ones(self._X.shape[1])
+
+        # stohastic gradient parameters
+        random.seed(self.random_state)
+        total_rows = self._X.shape[0]
+        if self.sgd_sample is None:
+            sgd_batch = total_rows
+        elif type(self.sgd_sample) is int:
+            sgd_batch = self.sgd_sample
+        elif type(self.sgd_sample) is float:
+            sgd_batch = round(total_rows * self.sgd_sample)
 
         for n in range(1, self._n_iter+1):
             # predict
@@ -69,7 +83,8 @@ class MyLineReg():
             penalty = getattr(self, '_' + self._reg)() if self._reg else (0, 0)
             loss = self._mean_squared_error(y, y_hat) + penalty[0]
             # gradient step
-            partial_w = 2 / self._X.shape[0] * (y_hat - y) @ self._X + penalty[1]
+            sample_rows_idx = random.sample(range(total_rows), sgd_batch)
+            partial_w = 2 / self._X.iloc[sample_rows_idx].shape[0] * (y_hat.iloc[sample_rows_idx] - y.iloc[sample_rows_idx]) @ self._X.iloc[sample_rows_idx] + penalty[1]
             # choose learning rate
             if hasattr(self._learning_rate, '__call__'):
                 lr = self._learning_rate(n)
@@ -109,7 +124,7 @@ class MyLineReg():
         return self._weights[1:]
     
     def __str__(self):
-        return f"{__class__.__name__} class: n_iter={self.n_iter}, learning_rate={self.learning_rate}"
+        return f"{__class__.__name__} class: n_iter={self._n_iter}, learning_rate={self._learning_rate}"
     
 df_prices = pd.read_csv('C:/Users/chugu/datasets/linear_reg/boston_house_prices.csv')
 X = df_prices.loc[:, df_prices.columns != 'MEDV']
@@ -118,7 +133,8 @@ y = df_prices['MEDV']
 X_train, y_train = X[:400], y[:400]
 X_test, y_test = X[:400], y[:400]
 
-lin_reg = MyLineReg(n_iter=250, learning_rate=lambda iter: 0.95 ** iter, reg='elasticnet', l1_coef=0.1, l2_coef=0.1)
+lin_reg = MyLineReg(n_iter=250,
+                     reg='elasticnet', l1_coef=0.1, l2_coef=0.1, sgd_sample=0.5)
 lin_reg.fit(X_train, y_train, verbose=50)
 print(lin_reg.get_best_score())
 y_pred = lin_reg.predict(X_test)
