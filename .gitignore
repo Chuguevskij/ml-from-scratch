@@ -4,5 +4,7 @@ __pycache__/
 
 # Distribution / packaging
 *.venv
+
+# Debug files
 test.py
 *.ipynb
