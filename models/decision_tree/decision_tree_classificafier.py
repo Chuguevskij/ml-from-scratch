@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from tree_node import DecisionNode
 
 
@@ -11,7 +12,8 @@ class MyTreeClf():
         self,
         max_depth=5,
         min_samples_split=2,
-        max_leaves=20
+        max_leafs=20,
+        bins=None
     ):
         """
         Initializes a Decision Tree.
@@ -20,17 +22,22 @@ class MyTreeClf():
             max_depth (int): Maximum depth of the decision tree. Defaults to 5.
             min_samples_split (int): Minimum number of samples required
             to split. Defaults to 2.
-            max_leaves (int): Maximum number of leaves in the tree. Defaults
+            max_leafs (int): Maximum number of leaves in the tree. Defaults
             to 20.
         """
         self.root = None
-        self.leaves_cnt = 0
-        self.potential_leaf_cnt = 0
+        self.leafs_cnt = 0
+        self.potential_leaves = 0
+        self.leaves_sum = None
 
         # Building restriction parameters
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
-        self.max_leaves = max_leaves
+        self.max_leafs = max_leafs
+
+        # Binarization
+        self.bins = bins
+        self.threshold_lists = None
 
     @staticmethod
     def _shannon_entropy(y, eps=1e-12):
@@ -54,6 +61,21 @@ class MyTreeClf():
             share_right * MyTreeClf._shannon_entropy(y_right)
         )
 
+    def _prepare_thresholds(self, X):
+        """Prepare thresholds based on feature binarization."""
+        n_samples, n_features = X.shape
+        binarized_thresholds = {}
+
+        for feature_i in range(n_features):
+            _, bins = np.histogram(X[:, feature_i], bins=self.bins)
+            unique_splits = np.unique(X[:, feature_i])
+            bins = bins[1:-1]
+            if len(unique_splits) <= len(bins) - 1:
+                binarized_thresholds[feature_i] = unique_splits
+            else:
+                binarized_thresholds[feature_i] = bins
+        return binarized_thresholds
+
     def _get_leaf_value(self, y, th=0.5):
         """
         Calculates the most occurring value in the given list of y values.
@@ -73,7 +95,7 @@ class MyTreeClf():
 
         return [prob_class_1, most_occuring_value]
 
-    def _get_best_split(self, X: np.ndarray, y: np.ndarray):
+    def _get_best_split(self, X, y):
         """Find the best feature and threshold to split."""
         n_samples, n_features = X.shape
         best_gain = -1
@@ -81,14 +103,20 @@ class MyTreeClf():
 
         for feature_i in range(n_features):
             feature_values = X[:, feature_i]
-            thresholds = np.unique(feature_values)
-            thresholds = np.sort(thresholds)
-            if len(thresholds) <= 1:
-                continue
-            splits = [
-                (thresholds[i] + thresholds[i + 1]) / 2
-                for i in range(len(thresholds) - 1)
-            ]
+            # Choose what thresholds to use
+            if self.threshold_lists:
+                splits = self.threshold_lists[feature_i]
+                if len(splits) <= 1:
+                    continue
+            else:
+                thresholds = np.unique(feature_values)
+                thresholds = np.sort(thresholds)
+                if len(thresholds) <= 1:
+                    continue
+                splits = [
+                    (thresholds[i] + thresholds[i + 1]) / 2
+                    for i in range(len(thresholds) - 1)
+                ]
 
             for threshold in splits:
                 left_mask = feature_values <= threshold
@@ -114,39 +142,26 @@ class MyTreeClf():
 
         return best_split
 
-    def check_stopping_criteria(self, y, depth):
-        """Check the criteria to stop building the tree."""
-        n_samples = len(y)
-        n_labels = len(np.unique(y))
-        too_many_leaves = (
-            self.leaves_cnt + self.potential_leaf_cnt >= self.max_leaves
-        )
-        if (
-            n_labels == 1 or
-            depth >= self.max_depth or
-            too_many_leaves or
-            n_samples <= self.min_samples_split
-        ):
-            return True
-        return False
-
     def _build_tree(self, X, y, depth=0, is_potential=False):
-        # If it was counted as potential before, convert it to real node now
-        if is_potential:
-            self.potential_leaf_cnt = max(0, self.potential_leaf_cnt - 1)
-
+        """Processes a single split."""
         if self.check_stopping_criteria(y, depth):
-            self.leaves_cnt += 1
+            self.leafs_cnt += 1
             return DecisionNode(value=self._get_leaf_value(y))
+
+        if self.leafs_cnt + self.potential_leaves >= self.max_leafs:
+            self.leafs_cnt += 1
+            return DecisionNode(value=self._get_leaf_value(y))
+
+        # Reserve a potential leaf for this node
+        self.potential_leaves += 1
 
         split = self._get_best_split(X, y)
 
         if split is None or split['gain'] <= 0 or split['feature_i'] is None:
-            self.leaves_cnt += 1
+            # Cannot split: convert potential leaf to a final leaf
+            self.potential_leaves -= 1
+            self.leafs_cnt += 1
             return DecisionNode(value=self._get_leaf_value(y))
-
-        # Now we're going to split, so we add 2 new potential leaves
-        self.potential_leaf_cnt += 2
 
         feature = split['feature_i']
         threshold = split['threshold']
@@ -158,6 +173,9 @@ class MyTreeClf():
         right = self._build_tree(
             X[right_mask], y[right_mask], depth + 1, is_potential=True)
 
+        # After building children, there are no potential leaves
+        self.potential_leaves -= 1
+
         return DecisionNode(
             feature_i=feature,
             threshold=threshold,
@@ -166,11 +184,34 @@ class MyTreeClf():
             right_branch=right,
         )
 
+    def check_stopping_criteria(self, y, depth):
+        """Check the criteria to stop building the tree."""
+        n_samples = len(y)
+        n_labels = len(np.unique(y))
+        too_many_leaves = (
+            self.leafs_cnt + self.potential_leaves >= self.max_leafs
+        )
+        if (
+            n_labels == 1 or
+            depth >= self.max_depth or
+            too_many_leaves or
+            n_samples <= self.min_samples_split
+        ):
+            return True
+        return False
+
     def fit(self, X, y):
         """Fit the decision tree classifier to the data."""
-        X = np.array(X)
+        if isinstance(X, pd.DataFrame):
+            self.feature_names = list(X.columns)
+            X = X.values
+        else:
+            self.feature_names = None
         y = np.array(y)
-        self.leaves_cnt = 0
+        self.leafs_cnt = 0
+        self.threshold_lists = None
+        if self.bins:
+            self.threshold_lists = self._prepare_thresholds(X)
         self.root = self._build_tree(X, y)
 
     def predict_proba(self, X_pred):
@@ -195,6 +236,22 @@ class MyTreeClf():
         "Predict class."
         probs = self.predict_proba(X_pred)
         return (probs > 0.5).astype(int)
+
+    def calculate_leaves(self):
+        """
+        Calculates sum of leaves from bft().
+        """
+        levels = self.bft()
+        levels = self.bft()
+        self.leaves_sum = sum(
+            num[0] for sublist in levels
+            for num in sublist
+            if not isinstance(num, tuple)
+        )
+
+    def print_stat(self):
+        self.calculate_leaves()
+        print(f"leaves number: {self.leafs_cnt}, leaves sum: {self.leaves_sum}")
 
     def bft(self):
         "Breadth-first traversal."
@@ -229,19 +286,17 @@ class MyTreeClf():
         return res
 
     def print_tree(self):
-        """
-        Print of tree levels from bft().
-        """
         levels = self.bft()
         for level_idx, nodes in enumerate(levels):
             indent = "  " * level_idx
             for node in nodes:
                 if isinstance(node, tuple):
                     feature_i, threshold = node
-                    print(
-                        f"{indent}Level {level_idx}: "
-                        f"(feature {feature_i} <= {threshold})"
-                    )
+                    if self.feature_names and feature_i is not None:
+                        feature_label = self.feature_names[feature_i]
+                    else:
+                        feature_label = f"feature {feature_i}"
+                    print(f"{indent}Level {level_idx}: ({feature_label} <= {threshold})")
                 else:
                     print(f"{indent}Level {level_idx}: Predict: {node}")
 
@@ -249,5 +304,5 @@ class MyTreeClf():
         return (
             f"{__class__.__name__} class: max_depth={self.max_depth}, "
             f"min_samples_split={self.min_samples_split}, "
-            f"max_leaves={self.max_leaves}"
+            f"max_leafs={self.max_leafs}"
             )
