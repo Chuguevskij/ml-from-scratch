@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
-from tree_node import DecisionNode
+
+from .tree_node import DecisionNode
 
 
 class MyTreeReg():
@@ -13,7 +14,8 @@ class MyTreeReg():
         max_depth=5,
         min_samples_split=2,
         max_leafs=20,
-        bins=None
+        bins=None,
+        n_total_ensemble=None
     ):
         self.root = None
         self.leafs_cnt = 1
@@ -26,7 +28,7 @@ class MyTreeReg():
         self.bins = bins
         self.threshold_lists = None
         self.feature_names = None
-        self.fi = {}
+        self.n_total_ensemble = n_total_ensemble
 
     @staticmethod
     def _variance(y):
@@ -194,6 +196,8 @@ class MyTreeReg():
 
     def _feature_importance(self, X):
         n_total, f_total = X.shape
+        if self.n_total_ensemble:
+            n_total = self.n_total_ensemble
         fi = {f: 0 for f in range(f_total)}
 
         def traverse(node, X_subset):
