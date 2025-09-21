@@ -26,8 +26,7 @@ class MyTreeClf():
             to 20.
         """
         self.root = None
-        self.leafs_cnt = 0
-        self.potential_leaves = 0
+        self.leafs_cnt = 1
         self.leaves_sum = None
 
         # Building restriction parameters
@@ -62,18 +61,27 @@ class MyTreeClf():
         )
 
     def _prepare_thresholds(self, X):
-        """Prepare thresholds based on feature binarization."""
+        """Prepare thresholds based on bins or unique values (aligned with regression)."""
         n_samples, n_features = X.shape
         binarized_thresholds = {}
 
         for feature_i in range(n_features):
-            _, bins = np.histogram(X[:, feature_i], bins=self.bins)
             unique_splits = np.unique(X[:, feature_i])
-            bins = bins[1:-1]
-            if len(unique_splits) <= len(bins) - 1:
-                binarized_thresholds[feature_i] = unique_splits
+
+            if self.bins is None or len(unique_splits) <= self.bins:
+                # Use midpoints between sorted unique values
+                if len(unique_splits) > 1:
+                    binarized_thresholds[feature_i] = [
+                        (unique_splits[i] + unique_splits[i+1]) / 2
+                        for i in range(len(unique_splits)-1)
+                    ]
+                else:
+                    binarized_thresholds[feature_i] = unique_splits
             else:
-                binarized_thresholds[feature_i] = bins
+                # Use histogram bin edges (excluding min and max)
+                _, bins = np.histogram(X[:, feature_i], bins=self.bins)
+                binarized_thresholds[feature_i] = bins[1:-1]
+
         return binarized_thresholds
 
     def _get_leaf_value(self, y, th=0.5):
@@ -87,13 +95,13 @@ class MyTreeClf():
             The most occurring value in the list.
         """
         # Most occurring value
-        values, counts = np.unique(y, return_counts=True)
-        most_occuring_value = values[np.argmax(counts)]
+        # values, counts = np.unique(y, return_counts=True)
+        # most_occuring_value = values[np.argmax(counts)]
 
         # Probability of class 1
         prob_class_1 = np.mean(y == 1)
 
-        return [prob_class_1, most_occuring_value]
+        return prob_class_1
 
     def _get_best_split(self, X, y):
         """Find the best feature and threshold to split."""
@@ -142,63 +150,38 @@ class MyTreeClf():
 
         return best_split
 
-    def _build_tree(self, X, y, depth=0, is_potential=False):
-        """Processes a single split."""
-        if self.check_stopping_criteria(y, depth):
-            self.leafs_cnt += 1
-            return DecisionNode(value=self._get_leaf_value(y))
+    def _build_tree(self, X, y, depth=0):
+        n_labels = len(np.unique(y))
+        n_samples = len(y)
 
-        if self.leafs_cnt + self.potential_leaves >= self.max_leafs:
-            self.leafs_cnt += 1
+        # Standard stopping criteria
+        if (
+            n_labels <= 1 or
+            depth >= self.max_depth or
+            n_samples < self.min_samples_split or
+            self.leafs_cnt >= self.max_leafs
+        ):
             return DecisionNode(value=self._get_leaf_value(y))
-
-        # Reserve a potential leaf for this node
-        self.potential_leaves += 1
 
         split = self._get_best_split(X, y)
-
         if split is None or split['gain'] <= 0 or split['feature_i'] is None:
-            # Cannot split: convert potential leaf to a final leaf
-            self.potential_leaves -= 1
-            self.leafs_cnt += 1
             return DecisionNode(value=self._get_leaf_value(y))
+
+        # Real split -> only now increment leaf counter
+        self.leafs_cnt += 1
 
         feature = split['feature_i']
         threshold = split['threshold']
-        left_mask = split['left_mask']
-        right_mask = split['right_mask']
-
-        left = self._build_tree(
-            X[left_mask], y[left_mask], depth + 1, is_potential=True)
-        right = self._build_tree(
-            X[right_mask], y[right_mask], depth + 1, is_potential=True)
-
-        # After building children, there are no potential leaves
-        self.potential_leaves -= 1
+        left = self._build_tree(X[split['left_mask']], y[split['left_mask']], depth+1)
+        right = self._build_tree(X[split['right_mask']], y[split['right_mask']], depth+1)
 
         return DecisionNode(
             feature_i=feature,
             threshold=threshold,
             gain=split['gain'],
             left_branch=left,
-            right_branch=right,
+            right_branch=right
         )
-
-    def check_stopping_criteria(self, y, depth):
-        """Check the criteria to stop building the tree."""
-        n_samples = len(y)
-        n_labels = len(np.unique(y))
-        too_many_leaves = (
-            self.leafs_cnt + self.potential_leaves >= self.max_leafs
-        )
-        if (
-            n_labels == 1 or
-            depth >= self.max_depth or
-            too_many_leaves or
-            n_samples <= self.min_samples_split
-        ):
-            return True
-        return False
 
     def fit(self, X, y):
         """Fit the decision tree classifier to the data."""
@@ -208,7 +191,7 @@ class MyTreeClf():
         else:
             self.feature_names = None
         y = np.array(y)
-        self.leafs_cnt = 0
+        self.leafs_cnt = 1
         self.threshold_lists = None
         if self.bins:
             self.threshold_lists = self._prepare_thresholds(X)
@@ -224,7 +207,7 @@ class MyTreeClf():
 
         def _predict_proba_sample(node, x):
             if node.value is not None:
-                return node.value[0]
+                return node.value
             if x[node.feature_i] <= node.threshold:
                 return _predict_proba_sample(node.left_branch, x)
             else:
@@ -242,9 +225,8 @@ class MyTreeClf():
         Calculates sum of leaves from bft().
         """
         levels = self.bft()
-        levels = self.bft()
         self.leaves_sum = sum(
-            num[0] for sublist in levels
+            num for sublist in levels
             for num in sublist
             if not isinstance(num, tuple)
         )

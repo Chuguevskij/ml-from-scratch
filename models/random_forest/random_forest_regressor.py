@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 
 from models.decision_tree import MyTreeReg, DecisionNode
+from metrics import regression_metrics as metrics
 
 
 class MyForestReg:
@@ -16,7 +17,8 @@ class MyForestReg:
         max_depth=5,
         min_samples_split=2,
         max_leafs=20,
-        bins=16
+        bins=16,
+        oob_score=None
     ):
         self.n_estimators = n_estimators
         self.max_features = max_features
@@ -26,10 +28,14 @@ class MyForestReg:
         self.min_samples_split = min_samples_split
         self.max_leafs = max_leafs
         self.bins = bins
+        self.oob_score = oob_score
 
         self.leafs_cnt = 0
         self.trees = []
         self.fi = {}
+        self.oob_preds_ = None
+        self.oob_counts_ = None
+        self.oob_score_ = None
 
     def fit(self, X, y):
         """Train random forest regressor."""
@@ -38,7 +44,10 @@ class MyForestReg:
         init_cols = X.columns.tolist()
         cols_smpl_cnt = round(self.max_features * init_cols_cnt)
         rows_smpl_cnt = round(self.max_samples * init_rows_cnt)
+        all_indices = set([i for i in range(init_rows_cnt)])
         self.fi = {col: 0.0 for col in init_cols}
+        self.oob_preds_ = np.zeros(len(y))
+        self.oob_counts_ = np.zeros(len(y))
 
         # Train a forest
         for _ in range(self.n_estimators):
@@ -58,9 +67,26 @@ class MyForestReg:
             single_tree.fit(bt_X, bt_y)
             self.trees.append((single_tree, cols_idx))
 
+            # Collect OOB preds
+            if self.oob_score:
+                oob_indices = list(all_indices - set(rows_idx))
+                self.oob_preds_[oob_indices] += single_tree.predict(
+                    X.loc[oob_indices, cols_idx]
+                )
+                self.oob_counts_[oob_indices] += 1
+
             # Sum feature importance (no weighting here!)
             for f in self.fi.keys():
                 self.fi[f] += single_tree.fi.get(f, 0.0)
+
+        # Evaluate on OOB preds
+        if self.oob_score:
+            mask = self.oob_counts_ > 0
+            self.oob_score_ = None
+            if np.any(mask):
+                oob_mean_preds = self.oob_preds_[mask] / self.oob_counts_[mask]
+                metric_func = getattr(metrics, self.oob_score)
+                self.oob_score_ = metric_func(y[mask], oob_mean_preds)
 
         for tree, _ in self.trees:
             self.leafs_cnt += tree.leafs_cnt
