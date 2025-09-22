@@ -75,7 +75,7 @@ class MyForestReg:
                 )
                 self.oob_counts_[oob_indices] += 1
 
-            # Sum feature importance (no weighting here!)
+            # Sum feature importance
             for f in self.fi.keys():
                 self.fi[f] += single_tree.fi.get(f, 0.0)
 
