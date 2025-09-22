@@ -1,11 +1,12 @@
 import numpy as np
 import pandas as pd
-from tree_node import DecisionNode
+
+from .tree_node import DecisionNode
 
 
-class MyTreeClf():
+class MyTreeReg():
     """
-    A simple implementation of a Decision Tree Classifier.
+    Decision Tree Regressor.
     """
 
     def __init__(
@@ -13,131 +14,81 @@ class MyTreeClf():
         max_depth=5,
         min_samples_split=2,
         max_leafs=20,
-        bins=None
+        bins=None,
+        n_total_ensemble=None
     ):
-        """
-        Initializes a Decision Tree.
-
-        Args:
-            max_depth (int): Maximum depth of the decision tree. Defaults to 5.
-            min_samples_split (int): Minimum number of samples required
-            to split. Defaults to 2.
-            max_leafs (int): Maximum number of leaves in the tree. Defaults
-            to 20.
-        """
         self.root = None
         self.leafs_cnt = 1
         self.leaves_sum = None
 
-        # Building restriction parameters
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.max_leafs = max_leafs
 
-        # Binarization
         self.bins = bins
         self.threshold_lists = None
+        self.feature_names = None
+        self.n_total_ensemble = n_total_ensemble
 
     @staticmethod
-    def _shannon_entropy(y, eps=1e-12):
-        """Calculate shannon_entropy for a single sample."""
-        p_0 = len(y[y == 0]) / len(y)
-        p_1 = len(y[y == 1]) / len(y)
-        return -(
-            p_0 * np.log2(p_0+eps) +
-            p_1 * np.log2(p_1+eps)
-        )
+    def _variance(y):
+        n = len(y)
+        y_mean = np.mean(y)
+        return np.sum((y - y_mean) ** 2) / n
 
     @staticmethod
-    def _information_gain(y, y_left, y_right):
-        """Calculate information gain for a single split."""
+    def _variance_reduction(y, y_left, y_right):
         n = len(y)
         share_left = len(y_left) / n
         share_right = len(y_right) / n
         return (
-            MyTreeClf._shannon_entropy(y) -
-            share_left * MyTreeClf._shannon_entropy(y_left) -
-            share_right * MyTreeClf._shannon_entropy(y_right)
-        )
+            MyTreeReg._variance(y)
+            - share_left * MyTreeReg._variance(y_left)
+            - share_right * MyTreeReg._variance(y_right))
 
     def _prepare_thresholds(self, X):
-        """Prepare thresholds based on bins or unique values (aligned with regression)."""
+        """Prepare thresholds based on bins or unique values."""
         n_samples, n_features = X.shape
         binarized_thresholds = {}
 
         for feature_i in range(n_features):
             unique_splits = np.unique(X[:, feature_i])
-
             if self.bins is None or len(unique_splits) <= self.bins:
-                # Use midpoints between sorted unique values
-                if len(unique_splits) > 1:
-                    binarized_thresholds[feature_i] = [
-                        (unique_splits[i] + unique_splits[i+1]) / 2
-                        for i in range(len(unique_splits)-1)
-                    ]
-                else:
-                    binarized_thresholds[feature_i] = unique_splits
+                binarized_thresholds[feature_i] = [
+                    (unique_splits[i] + unique_splits[i+1]) / 2
+                    for i in range(len(unique_splits)-1)
+                ]
             else:
-                # Use histogram bin edges (excluding min and max)
                 _, bins = np.histogram(X[:, feature_i], bins=self.bins)
                 binarized_thresholds[feature_i] = bins[1:-1]
-
         return binarized_thresholds
 
-    def _get_leaf_value(self, y, th=0.5):
-        """
-        Calculates the most occurring value in the given list of y values.
-
-        Args:
-            y (list): The list of y values.
-
-        Returns:
-            The most occurring value in the list.
-        """
-        # Most occurring value
-        # values, counts = np.unique(y, return_counts=True)
-        # most_occuring_value = values[np.argmax(counts)]
-
-        # Probability of class 1
-        prob_class_1 = np.mean(y == 1)
-
-        return prob_class_1
-
     def _get_best_split(self, X, y):
-        """Find the best feature and threshold to split."""
         n_samples, n_features = X.shape
         best_gain = -1
         best_split = None
 
         for feature_i in range(n_features):
             feature_values = X[:, feature_i]
-            # Choose what thresholds to use
+
             if self.threshold_lists:
                 splits = self.threshold_lists[feature_i]
-                if len(splits) <= 1:
+                if len(splits) <= 0:
                     continue
             else:
                 thresholds = np.unique(feature_values)
                 thresholds = np.sort(thresholds)
                 if len(thresholds) <= 1:
                     continue
-                splits = [
-                    (thresholds[i] + thresholds[i + 1]) / 2
-                    for i in range(len(thresholds) - 1)
-                ]
+                splits = [(thresholds[i] + thresholds[i + 1]) / 2 for i in range(len(thresholds)-1)]
 
             for threshold in splits:
                 left_mask = feature_values <= threshold
                 right_mask = feature_values > threshold
-
                 if np.sum(left_mask) == 0 or np.sum(right_mask) == 0:
                     continue
-
-                y_left = y[left_mask]
-                y_right = y[right_mask]
-
-                gain = self._information_gain(y, y_left, y_right)
-
+                y_left, y_right = y[left_mask], y[right_mask]
+                gain = self._variance_reduction(y, y_left, y_right)
                 if gain > best_gain:
                     best_gain = gain
                     best_split = {
@@ -147,7 +98,6 @@ class MyTreeClf():
                         'left_mask': left_mask,
                         'right_mask': right_mask
                     }
-
         return best_split
 
     def _build_tree(self, X, y, depth=0):
@@ -161,11 +111,11 @@ class MyTreeClf():
             n_samples < self.min_samples_split or
             self.leafs_cnt >= self.max_leafs
         ):
-            return DecisionNode(value=self._get_leaf_value(y))
+            return DecisionNode(value=np.mean(y))
 
         split = self._get_best_split(X, y)
         if split is None or split['gain'] <= 0 or split['feature_i'] is None:
-            return DecisionNode(value=self._get_leaf_value(y))
+            return DecisionNode(value=np.mean(y))
 
         # Real split -> only now increment leaf counter
         self.leafs_cnt += 1
@@ -184,7 +134,6 @@ class MyTreeClf():
         )
 
     def fit(self, X, y):
-        """Fit the decision tree classifier to the data."""
         if isinstance(X, pd.DataFrame):
             self.feature_names = list(X.columns)
             X = X.values
@@ -192,48 +141,26 @@ class MyTreeClf():
             self.feature_names = None
         y = np.array(y)
         self.leafs_cnt = 1
-        self.threshold_lists = None
         if self.bins:
             self.threshold_lists = self._prepare_thresholds(X)
         self.root = self._build_tree(X, y)
+        self.fi = self._feature_importance(X)
 
-    def predict_proba(self, X_pred):
-        "Predict probability for the 1st class."
+    def predict(self, X_pred):
         if self.root is None:
-            print('Tree is not build')
             return []
 
         X_pred = np.array(X_pred)
 
-        def _predict_proba_sample(node, x):
+        def predict_sample(node, x):
             if node.value is not None:
                 return node.value
             if x[node.feature_i] <= node.threshold:
-                return _predict_proba_sample(node.left_branch, x)
+                return predict_sample(node.left_branch, x)
             else:
-                return _predict_proba_sample(node.right_branch, x)
+                return predict_sample(node.right_branch, x)
 
-        return np.array([_predict_proba_sample(self.root, x) for x in X_pred])
-
-    def predict(self, X_pred):
-        "Predict class."
-        probs = self.predict_proba(X_pred)
-        return (probs > 0.5).astype(int)
-
-    def calculate_leaves(self):
-        """
-        Calculates sum of leaves from bft().
-        """
-        levels = self.bft()
-        self.leaves_sum = sum(
-            num for sublist in levels
-            for num in sublist
-            if not isinstance(num, tuple)
-        )
-
-    def print_stat(self):
-        self.calculate_leaves()
-        print(f"leaves number: {self.leafs_cnt}, leaves sum: {self.leaves_sum}")
+        return np.array([predict_sample(self.root, x) for x in X_pred])
 
     def bft(self):
         "Breadth-first traversal."
@@ -267,18 +194,64 @@ class MyTreeClf():
 
         return res
 
+    def _feature_importance(self, X):
+        n_total, f_total = X.shape
+        if self.n_total_ensemble:
+            n_total = self.n_total_ensemble
+        fi = {f: 0 for f in range(f_total)}
+
+        def traverse(node, X_subset):
+            if node.value is not None:
+                return
+
+            # weighted contribution of this split
+            n_samples_node = len(X_subset)
+            fi[node.feature_i] += node.gain * n_samples_node / n_total
+
+            # split X and y according to this node's threshold
+            left_mask = X_subset[:, node.feature_i] <= node.threshold
+            right_mask = X_subset[:, node.feature_i] > node.threshold
+
+            if node.left_branch:
+                traverse(node.left_branch, X_subset[left_mask])
+            if node.right_branch:
+                traverse(node.right_branch, X_subset[right_mask])
+        traverse(self.root, X)
+
+        if self.feature_names:
+            fi_names = {self.feature_names[i]: v for i, v in fi.items()}
+            return fi_names
+        return fi
+
+    def calculate_leaves(self):
+        """
+        Calculates sum of leaves from bft().
+        """
+        levels = self.bft()
+        self.leaves_sum = sum(
+            num for sublist in levels
+            for num in sublist
+            if not isinstance(num, tuple)
+        )
+
+    def print_stat(self):
+        self.calculate_leaves()
+        print(f"leaves number: {self.leafs_cnt}, leaves sum: {self.leaves_sum}")
+
     def print_tree(self):
+        """
+        Print of tree levels from bft().
+        """
         levels = self.bft()
         for level_idx, nodes in enumerate(levels):
             indent = "  " * level_idx
             for node in nodes:
                 if isinstance(node, tuple):
                     feature_i, threshold = node
-                    if self.feature_names and feature_i is not None:
-                        feature_label = self.feature_names[feature_i]
-                    else:
-                        feature_label = f"feature {feature_i}"
-                    print(f"{indent}Level {level_idx}: ({feature_label} <= {threshold})")
+                    print(
+                        f"{indent}Level {level_idx}: "
+                        f"(feature {feature_i} <= {threshold})"
+                    )
                 else:
                     print(f"{indent}Level {level_idx}: Predict: {node}")
 

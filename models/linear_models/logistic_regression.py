@@ -45,7 +45,7 @@ class MyLogReg:
             self._weights -= self._learning_rate * dw
 
             # get metric
-            if self._metric:            
+            if self._metric:
                 self.score = getattr(self, '_' + self._metric)(y, y_hat)
                 verbose_score = f' | {self._metric}: {self.score}'
             else:
