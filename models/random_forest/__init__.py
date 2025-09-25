@@ -1,1 +1,2 @@
 from .random_forest_regressor import MyForestReg
+from .random_forest_classifier import MyForestClf
