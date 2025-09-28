@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from models.decision_tree import MyTreeReg, DecisionNode
-from metrics import regression_metrics as metrics
+from metrics.regression import *
 
 
 class MyForestReg:
