@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
-from tree_node import DecisionNode
+
+from .tree_node import DecisionNode
 
 
 class MyTreeClf():
@@ -13,7 +14,8 @@ class MyTreeClf():
         max_depth=5,
         min_samples_split=2,
         max_leafs=20,
-        bins=None
+        bins=None,
+        criterion='entropy',
     ):
         """
         Initializes a Decision Tree.
@@ -37,6 +39,9 @@ class MyTreeClf():
         # Binarization
         self.bins = bins
         self.threshold_lists = None
+
+        # Criterion
+        self.criterion = criterion
 
     @staticmethod
     def _shannon_entropy(y, eps=1e-12):
