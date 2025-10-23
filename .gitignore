@@ -1,4 +1,11 @@
-.venv/
-linear_models/analyis.ipynb
-.mypy_cache
-__pycache__
+__pycache__/
+*.py[cod]
+
+# Distribution / packaging
+*.venv
+
+# Debug files
+test.py
+*.ipynb
+
+*.egg-info/
