@@ -1,3 +1,11 @@
+import random
+
+import numpy as np
+import pandas as pd
+
+from metrics.distance import *
+
+
 class MyKMeans():
     def __init__(
         self,
@@ -10,6 +18,10 @@ class MyKMeans():
         self.max_iter = max_iter
         self.n_init = n_init
         self.random_state = random_state
+
+    def fit(self, X, y):
+        self.X = np.array(X)
+        self.y = np.array(y)
 
     def __str__(self):
         params = [
