@@ -125,16 +125,3 @@ class MyLineReg():
     
     def __str__(self):
         return f"{__class__.__name__} class: n_iter={self._n_iter}, learning_rate={self._learning_rate}"
-    
-df_prices = pd.read_csv('C:/Users/chugu/datasets/linear_reg/boston_house_prices.csv')
-X = df_prices.loc[:, df_prices.columns != 'MEDV']
-X = (X-X.min())/(X.max()-X.min())
-y = df_prices['MEDV']
-X_train, y_train = X[:400], y[:400]
-X_test, y_test = X[:400], y[:400]
-
-lin_reg = MyLineReg(n_iter=250,
-                     reg='elasticnet', l1_coef=0.1, l2_coef=0.1, sgd_sample=0.5)
-lin_reg.fit(X_train, y_train, verbose=50)
-print(lin_reg.get_best_score())
-y_pred = lin_reg.predict(X_test)
